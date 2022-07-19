@@ -59,3 +59,25 @@ VALUES
 (2, 3, true, 'system'),
 (2, 4, true, 'system')
 ;
+
+
+
+INSERT INTO sample.master
+(master_type, start_date, end_date, created_at, created_user)
+VALUES
+    ('1', '2021-09-01', '2022-12-09', now(), 'system'),
+    ('2', '2021-09-01', '2022-12-10', now(), 'system')
+;
+
+
+INSERT INTO sample.work_places
+(work_place_id, work_place_name)
+VALUES
+    (default,'拠点1'),
+    (default,'拠点2')
+;
+INSERT INTO sample.devices
+(id, name, ip_address, work_place_id, user_id)
+VALUES
+    (default, 'デバイス1', '192.168.30.120',1,1),
+    (default, 'デバイス1', '192.168.30.121',2,2)

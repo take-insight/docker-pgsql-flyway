@@ -263,10 +263,179 @@ COMMENT ON COLUMN sample.merchant_x_users.created_at IS '登録日時';
 COMMENT ON COLUMN sample.merchant_x_users.created_user IS '登録者';
 
 
-INSERT INTO sample.master
-  (master_type, start_date, end_date, created_at, created_user)
-VALUES
-  ('1', '2021-09-01', '2022-12-09', now(), 'system'),
-  ('2', '2021-09-01', '2022-12-10', now(), 'system')
-;
+-- 拠点
+CREATE SEQUENCE sample.seq_work_place_id
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    MAXVALUE 9223372036854770000
+    CACHE 1;
+CREATE TABLE sample.work_places (
+    work_place_id integer DEFAULT nextval('sample.seq_work_place_id'::regclass) NOT NULL,
+    work_place_name text NOT NULL,
+    CONSTRAINT work_places_pkey PRIMARY KEY (work_place_id)
+);
+
+-- 拠点が保有する端末情報
+CREATE SEQUENCE sample.seq_device_id
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    MAXVALUE 9223372036854770000
+    CACHE 1;
+CREATE TABLE sample.devices (
+    id integer DEFAULT nextval('sample.seq_device_id'::regclass) NOT NULL,
+    name text NOT NULL,
+    ip_address text NOT NULL,
+    work_place_id integer NOT NULL,
+    user_id integer NOT NULL,
+    CONSTRAINT devices_pkey PRIMARY KEY (id),
+    CONSTRAINT devices_ukey UNIQUE (ip_address),
+    CONSTRAINT devices_fkey1 FOREIGN KEY (work_place_id)
+        REFERENCES sample.work_places (work_place_id)
+        ON UPDATE NO ACTION ON DELETE CASCADE,
+    CONSTRAINT devices_fkey2 FOREIGN KEY (user_id)
+        REFERENCES sample.users (user_id)
+        ON UPDATE NO ACTION ON DELETE CASCADE
+);
+
+
+CREATE TABLE sample.yuseiooguchijigyoushoyubinbangous (
+    jis character(5) NOT NULL,
+    ooguchijigyoushotou_kana character varying(100) NOT NULL,
+    ooguchijigyoushotou_na_kanji character varying(160) NOT NULL,
+    todoufuken_kanji character varying(8) NOT NULL,
+    shikuchouson_kanji character varying(24) NOT NULL,
+    chouiki_kanji character varying(24) NOT NULL,
+    banchi_kanji character varying(124) NOT NULL,
+    ooguchijigyoushotou_kobetsu_bangou character(7) NOT NULL,
+    genkou_yubinbangou character(5) NOT NULL,
+    toriatsukai_yubinkyokumei_kanji character varying(40) NOT NULL,
+    kobetsubangoushubetsu_kbn character(1) NOT NULL,
+    fukusubangouumu_kbn character(1) NOT NULL,
+    shusei_kbn character(11) NOT NULL,
+    program_name text
+);
+
+CREATE TABLE sample.yuseiyubinbangous (
+    jis character(5) NOT NULL,
+    kyu_yubinbangou character(5) NOT NULL,
+    yubinbangou character(7) NOT NULL,
+    todoufuken_kana character varying(10) NOT NULL,
+    shikuchouson_kana character varying(100) NOT NULL,
+    chouiki_kana character varying(100) NOT NULL,
+    todoufuken_kanji character varying(8) NOT NULL,
+    shikuchouson_kanji character varying(100) NOT NULL,
+    chouiki_kanji character varying(100) NOT NULL,
+    fukusu_yubinbangou_kbn character(1) NOT NULL,
+    koazagoto_banchi_kbn character(1) NOT NULL,
+    choumu_yuchouiki_kbn character(1) NOT NULL,
+    fukusu_chouiki_kbn character(1) NOT NULL,
+    koushin_hyoji_kbn character(1) NOT NULL,
+    henkou_riyu_kbn character(1) NOT NULL,
+    program_name text
+);
+
+-- 郵政郵便番号監視
+--* RestoreFromTempTable
+create table sample.yuseiyubinbangous_audit (
+     jis character(5) not null
+    , kyu_yubinbangou character(5) not null
+    , yubinbangou character(7) not null
+    , todoufuken_kana character varying(10) not null
+    , shikuchouson_kana character varying(100) not null
+    , chouiki_kana character varying(100) not null
+    , todoufuken_kanji character varying(8) not null
+    , shikuchouson_kanji character varying(100) not null
+    , chouiki_kanji character varying(100) not null
+    , fukusu_yubinbangou_kbn character(1) not null
+    , koazagoto_banchi_kbn character(1) not null
+    , choumu_yuchouiki_kbn character(1) not null
+    , fukusu_chouiki_kbn character(1) not null
+    , koushin_hyoji_kbn character(1) not null
+    , henkou_riyu_kbn character(1) not null
+    , program_name text
+    , action_type CHAR(1) NOT NULL CHECK(action_type IN ('1', '2','3'))
+    , audit_date timestamp with time zone default now() not null
+) ;
+
+
+
+/**
+  * 履歴更新ストアド
+ */
+
+CREATE OR REPLACE FUNCTION sample.fnc_logged_audit()
+    RETURNS trigger
+    LANGUAGE plpgsql
+AS
+$body$
+DECLARE
+    audit_table_name text;
+    new_pivot record;
+    t_column_text text;
+    t_value_text text;
+    audit_sql text;
+    target_rec record;
+    action_type char(1);
+BEGIN
+    --履歴トリガー関数
+    BEGIN
+        IF(TG_OP = 'INSERT') THEN action_type := 1;
+        ELSEIF(TG_OP = 'UPDATE') THEN action_type := 2;
+        ELSE action_type := 3;
+        END IF;
+        audit_table_name :=  TG_TABLE_NAME||'_audit';
+        IF (TG_OP = 'INSERT' OR TG_OP = 'UPDATE'  ) THEN
+            target_rec := NEW;
+        ELSE
+            target_rec := OLD;
+        END IF;
+        t_column_text  := '';
+        t_value_text  := '';
+        -- NEWまたはOLDをjson成形後、pivotしたものをLOOP、column,valueを利用してSQLを生成する
+        FOR new_pivot in SELECT * FROM json_each_text((SELECT to_json(target_rec)))as a
+            LOOP
+            --RAISE WARNING 'test:%',new_pivot.key;
+            --RAISE WARNING 'test:%',new_pivot.value;
+                t_column_text := t_column_text||','||new_pivot.key;
+                IF new_pivot.value IS NULL THEN
+                    t_value_text := t_value_text||',null';
+                ELSE
+                    t_value_text := t_value_text||','||''''||new_pivot.value||'''';
+                END IF;
+            END LOOP;
+        t_column_text := t_column_text||',action_type';
+        t_value_text := t_value_text||','||''''||action_type||'''';
+        SELECT  INTO t_column_text (SELECT substr(t_column_text,2));
+        SELECT  INTO t_value_text (SELECT substr(t_value_text,2));
+        audit_sql := 'INSERT INTO  sample.'||audit_table_name|| ' ('||t_column_text||') VALUES('||t_value_text||')';
+        --RAISE WARNING 'test:%', audit_sql;
+        EXECUTE audit_sql;
+    EXCEPTION
+        WHEN division_by_zero THEN
+            RAISE WARNING 'caught division_by_zero';
+            RETURN NULL;
+        WHEN OTHERS THEN
+            RAISE WARNING  'fnc_logged_audit ERROR:%',sqlstate;
+            RETURN NULL;
+    END;
+    RETURN NULL;
+END;
+$body$
+    VOLATILE
+    COST 100;
+
+ALTER FUNCTION            sample.fnc_logged_audit() OWNER TO sample;
+GRANT EXECUTE ON FUNCTION sample.fnc_logged_audit() TO PUBLIC;
+
+
+
+
+/**
+  * yuseiyubinbangous更新履歴
+  */
+CREATE TRIGGER trg_yuseiyubinbangous_z AFTER INSERT OR UPDATE OR DELETE
+    ON sample.yuseiyubinbangous FOR EACH ROW
+EXECUTE PROCEDURE sample.fnc_logged_audit();
 
