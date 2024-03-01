@@ -1,4 +1,4 @@
-FROM postgres:10.13
+FROM postgres:10.23-bullseye
 RUN localedef -i ja_JP -c -f UTF-8 -A /usr/share/locale/locale.alias ja_JP.UTF-8
 ENV LANG ja_JP.utf8
 ENV PGDATA /var/lib/postgresql/data
